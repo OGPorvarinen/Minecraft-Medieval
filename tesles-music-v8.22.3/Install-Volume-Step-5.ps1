@@ -106,7 +106,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-    Where-Object { $_.CommandLine -and $_.CommandLine -like '*TeslesVoiceMusicWorker*app.js*' } |
+    Where-Object {
+        $_.CommandLine -and (
+            $_.CommandLine -like '*TeslesVoiceMusicWorker*app.js*' -or
+            ($_.ExecutablePath -eq $nodeExe -and $_.CommandLine -match '(^|\s|\")app\.js(\"|\s|$)')
+        )
+    } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 Start-Sleep -Milliseconds 700
@@ -116,23 +121,21 @@ if (-not (Test-Path -LiteralPath $logDir)) {
     New-Item -ItemType Directory -Path $logDir | Out-Null
 }
 
-Start-Process -FilePath $nodeExe `
+$process = Start-Process -FilePath $nodeExe `
     -ArgumentList "app.js" `
     -WorkingDirectory $Root `
     -WindowStyle Hidden `
     -RedirectStandardOutput (Join-Path $logDir "worker-out.log") `
-    -RedirectStandardError (Join-Path $logDir "worker-error.log")
+    -RedirectStandardError (Join-Path $logDir "worker-error.log") `
+    -PassThru
 
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 4
+$process.Refresh()
 
-$running = Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-    Where-Object { $_.CommandLine -and $_.CommandLine -like '*TeslesVoiceMusicWorker*app.js*' } |
-    Select-Object -First 1
-
-if (-not $running) {
+if ($process.HasExited) {
     Copy-Item -LiteralPath $backupFile -Destination $appFile -Force
     Start-Process -FilePath $nodeExe -ArgumentList "app.js" -WorkingDirectory $Root -WindowStyle Hidden
-    throw "Uusi versio ei kaynnistynyt. Vanha app.js palautettiin automaattisesti."
+    throw "Uusi versio sammui kaynnistyksessa. Vanha app.js palautettiin automaattisesti."
 }
 
 Write-Host "Valmis. Paneelin aanenvoimakkuus muuttuu nyt 5 prosenttia kerrallaan."
